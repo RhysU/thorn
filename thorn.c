@@ -22,7 +22,7 @@ extern int optind, opterr, optopt;
 // Generate an column-major bitmap of the fractal
 uint16_t* thorn(size_t width, size_t height, double cx, double cy);
 
-// Write a column-major bitmap to disk in binary PBM
+// Write a column-major bitmap to disk in binary PGM
 int pgmwrite(const char *name, size_t width, size_t height,
              uint16_t *data, const char *comment);
 
