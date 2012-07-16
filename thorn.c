@@ -20,7 +20,8 @@ extern char *optarg;
 extern int optind, opterr, optopt;
 
 // Generate an column-major bitmap of the fractal
-uint16_t* thorn(size_t width, size_t height, double cx, double cy);
+uint16_t* thorn(size_t width, size_t height, double cx, double cy,
+                uint16_t maxiter, double escape);
 
 // Write a column-major bitmap to disk in binary PGM
 int pgmwrite(const char *name, size_t width, size_t height,
@@ -29,19 +30,26 @@ int pgmwrite(const char *name, size_t width, size_t height,
 int main(int argc, char *argv[])
 {
     // Default options
-    size_t width = 1024, height = 768;
-    double cx    = 9.984, cy   = 7.55;
+    size_t   width   = 1024;
+    size_t   height  = 768;
+    double   cx      = 9.984;
+    double   cy      = 7.55;
+    uint16_t maxiter = 1024;
+    double   escape  = 1e4;
 
     // Parse command line arguments
-    static const char usage[]
-        = "Usage: %s [-w width] [-h height] [-x cx] [-y cy] pgmfile\n";
+    static const char usage[] = "Usage: %s [-w width] [-h height]"
+                                " [-x cx] [-y cy] [-m maxiter]"
+                                " [-e escape] pgmfile\n";
     int opt;
-    while ((opt = getopt(argc, argv, "w:h:x:y:")) != -1) {
+    while ((opt = getopt(argc, argv, "w:h:x:y:m:e:")) != -1) {
         switch (opt) {
-        case 'w': width  = atol(optarg);           break;
-        case 'h': height = atol(optarg);           break;
-        case 'x': cx     = atof(optarg);           break;
-        case 'y': cy     = atof(optarg);           break;
+        case 'w': width   = atol(optarg);          break;
+        case 'h': height  = atol(optarg);          break;
+        case 'x': cx      = atof(optarg);          break;
+        case 'y': cy      = atof(optarg);          break;
+        case 'm': maxiter = atol(optarg);          break;
+        case 'e': escape  = atof(optarg);          break;
         default:  fprintf(stderr, usage, argv[0]); exit(EXIT_FAILURE);
         }
     }
@@ -53,12 +61,14 @@ int main(int argc, char *argv[])
     const char * const pgmfile = argv[optind];
 
     // Generate Thorn fractal for given options
-    uint16_t *data = thorn(width, height, cx, cy);
+    uint16_t *data = thorn(width, height, cx, cy, maxiter, escape);
     if (!data) return EXIT_FAILURE;
 
     // Write grayscale buffer to PGM file
     char comment[255];
-    snprintf(comment, sizeof(comment), "Thorn fractal: cx=%g, cy=%g", cx, cy);
+    snprintf(comment, sizeof(comment),
+             "Thorn fractal: cx=%g, cy=%g, maxiter=%d, escape=%g",
+             cx, cy, maxiter, escape);
     pgmwrite(pgmfile, width, height, data, comment);
 
     // Tear down
@@ -66,19 +76,18 @@ int main(int argc, char *argv[])
     return EXIT_SUCCESS;
 }
 
-uint16_t* thorn(size_t width, size_t height, double cx, double cy)
+uint16_t* thorn(size_t width, size_t height, double cx, double cy,
+                uint16_t maxiter, double escape)
 {
-    const size_t iter = 1024;
     const double pi = 3.14159265358979323846264338327; // No M_PI in C99?!
     const double xmin = -pi, xmax = pi;
     const double ymin = -pi, ymax = pi;
-    const double escape = 1e4;
 
     uint16_t* data = (uint16_t*) malloc(width*height*sizeof(uint16_t));
 
     if (data) {
-#pragma omp parallel for default(none) shared(data)          \
-                         firstprivate(width, height, cx, cy)
+#pragma omp parallel for default(none) shared(data)                           \
+                         firstprivate(width, height, cx, cy, maxiter, escape)
         for (size_t i = 0; i < height; i++) {
             const double zi = ymin + i*(ymax - ymin) / height;
             for (size_t j = 0; j < width; j++) {
@@ -91,7 +100,7 @@ uint16_t* thorn(size_t width, size_t height, double cx, double cy)
                     b = ii;
                     ir = a / cos(b) + cx;
                     ii = b / sin(a) + cy;
-                } while (k++ < iter && (ir*ir + ii*ii) < escape);
+                } while (k++ < maxiter && (ir*ir + ii*ii) < escape);
                 data[i*width + j] = k;
             }
         }
