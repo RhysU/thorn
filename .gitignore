@@ -10,3 +10,9 @@
 *.lai
 *.la
 *.a
+
+# Compiled binaries
+thorn
+
+# PGM images
+*.pgm
