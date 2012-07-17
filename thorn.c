@@ -5,6 +5,9 @@
 //
 // Build with "cc -O3 -std=c99 -lm thorn.c -o thorn"
 
+// C99 drops getopt from unistd.h without this definition
+#define _POSIX_C_SOURCE 200112L
+
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -14,10 +17,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-// No idea why, but unistd.h isn't pulling in getopt...
-int getopt(int argc, char * const argv[], const char *optstring);
-extern char *optarg;
-extern int optind, opterr, optopt;
+// C99 dropped M_PI though not all compilers conform
+#ifndef M_PI
+#define M_PI (3.14159265358979323846264338327)
+#endif
 
 // Generate an column-major bitmap of the fractal
 uint16_t* thorn(size_t width, size_t height, double cx, double cy,
@@ -27,8 +30,13 @@ uint16_t* thorn(size_t width, size_t height, double cx, double cy,
 int pgmwrite(const char *name, size_t width, size_t height,
              uint16_t *data, const char *comment);
 
+// Parse comma-separated pairs of floating point values
+int scan_double_pair(const char *str, double *a, double *b);
+int scan_sizet_pair (const char *str, size_t *a, size_t *b);
+
 int main(int argc, char *argv[])
 {
+
     // Default options
     size_t   width   = 1024;
     size_t   height  = 768;
@@ -37,28 +45,47 @@ int main(int argc, char *argv[])
     uint16_t maxiter = 1024;
     double   escape  = 1e4;
 
-    // Parse command line arguments
-    static const char usage[] = "Usage: %s [-w width] [-h height]"
-                                " [-x cx] [-y cy] [-m maxiter]"
-                                " [-e escape] pgmfile\n";
+    // Parse command line flags
     int opt;
-    while ((opt = getopt(argc, argv, "w:h:x:y:m:e:")) != -1) {
+    int fail = 0;
+    while ((opt = getopt(argc, argv, "c:ems:")) != -1) {
         switch (opt) {
-        case 'w': width   = atol(optarg);          break;
-        case 'h': height  = atol(optarg);          break;
-        case 'x': cx      = atof(optarg);          break;
-        case 'y': cy      = atof(optarg);          break;
-        case 'm': maxiter = atol(optarg);          break;
-        case 'e': escape  = atof(optarg);          break;
-        default:  fprintf(stderr, usage, argv[0]); exit(EXIT_FAILURE);
+        case 'c':
+            if (scan_double_pair(optarg, &cx, &cy)) {
+                fprintf(stderr, "Expected a double pair \"cx,cy\"\n");
+                fail = 1;
+            }
+            break;
+        case 'e':
+            escape  = atof(optarg);
+            break;
+        case 'm':
+            maxiter = atol(optarg);
+            break;
+        case 's':
+            if (scan_sizet_pair(optarg, &width, &height)) {
+                fprintf(stderr, "Expected a size_t pair \"width,height\"\n");
+                fail = 1;
+            }
+            break;
+        default:
+            fail = 1;
+            break;
         }
     }
+    // Parse command line arguments
     if (optind >= argc) {
         fprintf(stderr, "Expected pgmfile argument after options\n");
+        fail = 1;
+    }
+    const char * const pgmfile = argv[optind];
+    // Bail if either failed
+    if (fail) {
+        static const char usage[] = "Usage: %s [-s width,height] [-c cx,cy]"
+                                    " [-m maxiter] [-e escape] pgmfile\n";
         fprintf(stderr, usage, argv[0]);
         exit(EXIT_FAILURE);
     }
-    const char * const pgmfile = argv[optind];
 
     // Generate Thorn fractal for given options
     uint16_t *data = thorn(width, height, cx, cy, maxiter, escape);
@@ -79,9 +106,8 @@ int main(int argc, char *argv[])
 uint16_t* thorn(size_t width, size_t height, double cx, double cy,
                 uint16_t maxiter, double escape)
 {
-    const double pi = 3.14159265358979323846264338327; // No M_PI in C99?!
-    const double xmin = -pi, xmax = pi;
-    const double ymin = -pi, ymax = pi;
+    const double xmin = -M_PI, xmax = M_PI;
+    const double ymin = -M_PI, ymax = M_PI;
 
     uint16_t* data = (uint16_t*) malloc(width*height*sizeof(uint16_t));
 
@@ -151,3 +177,14 @@ int pgmwrite(const char *name, size_t width, size_t height,
     return 0;
 }
 
+int scan_double_pair(const char *str, double *a, double *b)
+{
+    char ignore = '\0';
+    return 2 != sscanf(str ? str : "", "%lf , %lf %c", a, b, &ignore);
+}
+
+int scan_sizet_pair(const char *str, size_t *a, size_t *b)
+{
+    char ignore = '\0';
+    return 2 != sscanf(str ? str : "", "%zd , %zd %c", a, b, &ignore);
+}
