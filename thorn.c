@@ -23,12 +23,12 @@
 #endif
 
 // Generate an column-major bitmap of the fractal
-uint16_t* thorn(size_t width, size_t height, double cx, double cy,
-                uint16_t maxiter, double escape);
+uint8_t* thorn(size_t width, size_t height, double cx, double cy,
+               uint8_t maxiter, double escape);
 
 // Write a column-major bitmap to disk in binary PGM
 int pgmwrite(const char *name, size_t width, size_t height,
-             uint16_t *data, const char *comment);
+             uint8_t *data, const char *comment);
 
 // Parse comma-separated pairs of floating point values
 int scan_double_pair(const char *str, double *a, double *b);
@@ -36,13 +36,12 @@ int scan_sizet_pair (const char *str, size_t *a, size_t *b);
 
 int main(int argc, char *argv[])
 {
-
     // Default options
     size_t   width   = 1024;
     size_t   height  = 768;
     double   cx      = 9.984;
     double   cy      = 7.55;
-    uint16_t maxiter = 1024;
+    long     maxiter = 255;
     double   escape  = 1e4;
 
     // Parse command line flags
@@ -61,6 +60,10 @@ int main(int argc, char *argv[])
             break;
         case 'm':
             maxiter = atol(optarg);
+            if (maxiter > UINT8_MAX) {
+                fprintf(stderr, "At most %d iterations is supported", UINT8_MAX);
+                fail = 1;
+            }
             break;
         case 's':
             if (scan_sizet_pair(optarg, &width, &height)) {
@@ -88,28 +91,28 @@ int main(int argc, char *argv[])
     }
 
     // Generate Thorn fractal for given options
-    uint16_t *data = thorn(width, height, cx, cy, maxiter, escape);
+    uint8_t *data = thorn(width, height, cx, cy, (uint8_t) maxiter, escape);
     if (!data) return EXIT_FAILURE;
 
     // Write grayscale buffer to PGM file
     char comment[255];
     snprintf(comment, sizeof(comment),
-             "Thorn fractal: cx=%g, cy=%g, maxiter=%d, escape=%g",
+             "Thorn fractal: cx=%g, cy=%g, maxiter=%ld, escape=%g",
              cx, cy, maxiter, escape);
     pgmwrite(pgmfile, width, height, data, comment);
 
-    // Tear down
+    // Free resources and tear down
     free(data);
     return EXIT_SUCCESS;
 }
 
-uint16_t* thorn(size_t width, size_t height, double cx, double cy,
-                uint16_t maxiter, double escape)
+uint8_t* thorn(size_t width, size_t height, double cx, double cy,
+               uint8_t maxiter, double escape)
 {
     const double xmin = -M_PI, xmax = M_PI;
     const double ymin = -M_PI, ymax = M_PI;
 
-    uint16_t* data = (uint16_t*) malloc(width*height*sizeof(uint16_t));
+    uint8_t* data = (uint8_t*) malloc(width*height*sizeof(uint8_t));
 
     if (data) {
 #pragma omp parallel for default(none) shared(data)                           \
@@ -136,7 +139,7 @@ uint16_t* thorn(size_t width, size_t height, double cx, double cy,
 }
 
 int pgmwrite(const char *name, size_t width, size_t height,
-             uint16_t *data, const char *comment)
+             uint8_t *data, const char *comment)
 {
     FILE *f = fopen(name, "w");
     if (!f) {
@@ -146,7 +149,7 @@ int pgmwrite(const char *name, size_t width, size_t height,
 
     // Output PGM header per http://netpbm.sourceforge.net/doc/pgm.html
     // Requires one pass through data to compute maximum value
-    uint16_t maxval = 0;
+    uint8_t maxval = 0;
     for (size_t i = 0; i < height; ++i)
         for (size_t j = 0; j < width; ++j)
             maxval = data[i*width + j] > maxval ? data[i*width + j] : maxval;
@@ -155,23 +158,11 @@ int pgmwrite(const char *name, size_t width, size_t height,
     fprintf(f, "%Zu %Zu\n", width, height);
     fprintf(f, "%"PRIu16"\n", maxval);
 
-    // Use 8 bits per pixel when possible, otherwise use 16 bits MSB
-    // first again following http://netpbm.sourceforge.net/doc/pgm.html
-    if (maxval <= UINT8_MAX) {
-        for (size_t i = 0; i < height; ++i)
-            for (size_t j = 0; j < width; j++)
-                fputc((uint8_t) data[i*width + j], f);
-    } else {
-        for (size_t i = 0; i < height; ++i) {
-            for (size_t j = 0; j < width; ++j) {
-                uint16_t val = data[i*width + j];
-                uint8_t  msb = val / UINT8_MAX;
-                uint8_t  lsb = val & UINT8_MAX;
-                fputc(msb, f);
-                fputc(lsb, f);
-            }
-        }
-    }
+    // Output pixels following http://netpbm.sourceforge.net/doc/pgm.html
+    // See earlier revisions for code handling uint16_t grayscale values
+    for (size_t i = 0; i < height; ++i)
+        for (size_t j = 0; j < width; j++)
+            fputc((uint8_t) data[i*width + j], f);
 
     fclose(f);
     return 0;
