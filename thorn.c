@@ -22,9 +22,10 @@
 #define M_PI (3.14159265358979323846264338327)
 #endif
 
-// Generate an column-major bitmap of the fractal
-uint8_t* thorn(size_t width, size_t height, double cx, double cy,
-               uint8_t maxiter, double escape);
+// Generate a column-major bitmap of the Thorn fractal in *buf
+// buf will be realloc-ed as necessary to match width, height.
+void thorn(uint8_t **buf, size_t width, size_t height,
+           double cx, double cy, uint8_t maxiter, double escape);
 
 // Write a column-major bitmap to disk in binary PGM
 int pgmwrite(const char *name, size_t width, size_t height,
@@ -61,7 +62,7 @@ int main(int argc, char *argv[])
         case 'm':
             maxiter = atol(optarg);
             if (maxiter > UINT8_MAX) {
-                fprintf(stderr, "At most %d iterations is supported", UINT8_MAX);
+                fprintf(stderr, "Iterations must be less than %d", UINT8_MAX+1);
                 fail = 1;
             }
             break;
@@ -91,51 +92,51 @@ int main(int argc, char *argv[])
     }
 
     // Generate Thorn fractal for given options
-    uint8_t *data = thorn(width, height, cx, cy, (uint8_t) maxiter, escape);
-    if (!data) return EXIT_FAILURE;
+    uint8_t *buf = NULL;
+    thorn(&buf, width, height, cx, cy, (uint8_t) maxiter, escape);
+    if (!buf) return ENOMEM;
 
     // Write grayscale buffer to PGM file
     char comment[255];
     snprintf(comment, sizeof(comment),
              "Thorn fractal: cx=%g, cy=%g, maxiter=%ld, escape=%g",
              cx, cy, maxiter, escape);
-    pgmwrite(pgmfile, width, height, data, comment);
+    pgmwrite(pgmfile, width, height, buf, comment);
 
     // Free resources and tear down
-    free(data);
+    free(buf);
     return EXIT_SUCCESS;
 }
 
-uint8_t* thorn(size_t width, size_t height, double cx, double cy,
-               uint8_t maxiter, double escape)
+void thorn(uint8_t **buf, size_t width, size_t height,
+           double cx, double cy, uint8_t maxiter, double escape)
 {
     const double xmin = -M_PI, xmax = M_PI;
     const double ymin = -M_PI, ymax = M_PI;
 
-    uint8_t* data = (uint8_t*) malloc(width*height*sizeof(uint8_t));
+    // (*buf) is realloc-ed as necessary to permit use across invocations
+    *buf = realloc(*buf, width*height*sizeof(buf[0][0]));
+    if (!*buf) return;
 
-    if (data) {
-#pragma omp parallel for default(none) shared(data)                           \
-                         firstprivate(width, height, cx, cy, maxiter, escape)
-        for (size_t i = 0; i < height; i++) {
-            const double zi = ymin + i*(ymax - ymin) / height;
-            for (size_t j = 0; j < width; j++) {
-                const double zr = xmin + j*(xmax - xmin) / width;
+    // Notice buf is a private pointer-to-a-pointer so the data /is/ shared.
+#pragma omp parallel for default(none)                            \
+        firstprivate(buf, width, height, cx, cy, maxiter, escape)
+    for (size_t i = 0; i < height; i++) {
+        const double zi = ymin + i*(ymax - ymin) / height;
+        for (size_t j = 0; j < width; j++) {
+            const double zr = xmin + j*(xmax - xmin) / width;
 
-                size_t k = 0;
-                double ir = zr, ii = zi, a, b;
-                do {
-                    a = ir;
-                    b = ii;
-                    ir = a / cos(b) + cx;
-                    ii = b / sin(a) + cy;
-                } while (k++ < maxiter && (ir*ir + ii*ii) < escape);
-                data[i*width + j] = k;
-            }
+            size_t k = 0;
+            double ir = zr, ii = zi, a, b;
+            do {
+                a = ir;
+                b = ii;
+                ir = a / cos(b) + cx;
+                ii = b / sin(a) + cy;
+            } while (k++ < maxiter && (ir*ir + ii*ii) < escape);
+            (*buf)[i*width + j] = k;
         }
     }
-
-    return data;
 }
 
 int pgmwrite(const char *name, size_t width, size_t height,
