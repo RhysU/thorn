@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
     // Parse command line flags
     int opt;
     int fail = 0;
-    while ((opt = getopt(argc, argv, "c:ems:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:e:m:s:")) != -1) {
         switch (opt) {
         case 'c':
             if (scan_double_pair(optarg, &cx, &cy)) {
