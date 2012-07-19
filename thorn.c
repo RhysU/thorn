@@ -24,8 +24,9 @@
 
 // Generate a column-major bitmap of the Thorn fractal in *buf
 // buf will be realloc-ed as necessary to match width, height.
-void thorn(uint8_t **buf, size_t width, size_t height,
-           double cx, double cy, uint8_t maxiter, double escape);
+void thorn(uint8_t **buf, size_t width, size_t height, double cx, double cy,
+           double xmin, double xmax, double ymin, double ymax,
+           uint8_t maxiter, double escape);
 
 // Write a column-major bitmap to disk in binary PGM
 int pgmwrite(const char *name, size_t width, size_t height,
@@ -38,17 +39,21 @@ int scan_sizet_pair (const char *str, size_t *a, size_t *b);
 int main(int argc, char *argv[])
 {
     // Default options
-    size_t   width   = 1024;
-    size_t   height  = 768;
-    double   cx      = 9.984;
-    double   cy      = 7.55;
-    long     maxiter = 255;
-    double   escape  = 1e4;
+    size_t width   =  1024;
+    size_t height  =  512;
+    double cx      =  9.984;
+    double cy      =  7.55;
+    long   maxiter =  255;
+    double escape  =  1e4;
+    double xmin_pi = -1;
+    double xmax_pi =  1;
+    double ymin_pi = -1;
+    double ymax_pi =  1;
 
     // Parse command line flags
     int opt;
     int fail = 0;
-    while ((opt = getopt(argc, argv, "c:e:m:s:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:e:m:s:x:y:")) != -1) {
         switch (opt) {
         case 'c':
             if (scan_double_pair(optarg, &cx, &cy)) {
@@ -72,6 +77,18 @@ int main(int argc, char *argv[])
                 fail = 1;
             }
             break;
+        case 'x':
+            if (scan_double_pair(optarg, &xmin_pi, &xmax_pi)) {
+                fprintf(stderr, "Expected a double pair \"xmin/pi,xmax/pi\"\n");
+                fail = 1;
+            }
+            break;
+        case 'y':
+            if (scan_double_pair(optarg, &ymin_pi, &ymax_pi)) {
+                fprintf(stderr, "Expected a double pair \"ymin/pi,ymax/pi\"\n");
+                fail = 1;
+            }
+            break;
         default:
             fail = 1;
             break;
@@ -86,21 +103,25 @@ int main(int argc, char *argv[])
     // Bail if either failed
     if (fail) {
         static const char usage[] = "Usage: %s [-s width,height] [-c cx,cy]"
+                                    " [-x xmin/pi,xmax/pi] [-y ymin/pi,ymax/pi]"
                                     " [-m maxiter] [-e escape] pgmfile\n";
         fprintf(stderr, usage, argv[0]);
         exit(EXIT_FAILURE);
     }
 
     // Generate Thorn fractal for given options
+    const double xmin = xmin_pi*M_PI, xmax = xmax_pi*M_PI;
+    const double ymin = ymin_pi*M_PI, ymax = ymax_pi*M_PI;
     uint8_t *buf = NULL;
-    thorn(&buf, width, height, cx, cy, (uint8_t) maxiter, escape);
+    thorn(&buf, width, height, cx, cy, xmin, xmax, ymin, ymax,
+          (uint8_t) maxiter, escape);
     if (!buf) return ENOMEM;
 
     // Write grayscale buffer to PGM file
     char comment[255];
-    snprintf(comment, sizeof(comment),
-             "Thorn fractal: cx=%g, cy=%g, maxiter=%ld, escape=%g",
-             cx, cy, maxiter, escape);
+    snprintf(comment, sizeof(comment), "Thorn fractal: cx=%g, cy=%g, "
+             " x=[%g,%g), y=[%g,%g), maxiter=%ld, escape=%g",
+             cx, cy, xmin, xmax, ymin, ymax, maxiter, escape);
     pgmwrite(pgmfile, width, height, buf, comment);
 
     // Free resources and tear down
@@ -108,19 +129,18 @@ int main(int argc, char *argv[])
     return EXIT_SUCCESS;
 }
 
-void thorn(uint8_t **buf, size_t width, size_t height,
-           double cx, double cy, uint8_t maxiter, double escape)
+void thorn(uint8_t **buf, size_t width, size_t height, double cx, double cy,
+           double xmin, double xmax, double ymin, double ymax,
+           uint8_t maxiter, double escape)
 {
-    const double xmin = -M_PI, xmax = M_PI;
-    const double ymin = -M_PI, ymax = M_PI;
-
     // (*buf) is realloc-ed as necessary to permit use across invocations
     *buf = realloc(*buf, width*height*sizeof(buf[0][0]));
     if (!*buf) return;
 
     // Notice buf is a private pointer-to-a-pointer so the data /is/ shared.
-#pragma omp parallel for default(none)                            \
-        firstprivate(buf, width, height, cx, cy, maxiter, escape)
+#pragma omp parallel for default(none)                 \
+        firstprivate(buf, width, height, cx, cy, xmin, \
+                     xmax, ymin, ymax,maxiter, escape)
     for (size_t i = 0; i < height; i++) {
         const double zi = ymin + i*(ymax - ymin) / height;
         for (size_t j = 0; j < width; j++) {
